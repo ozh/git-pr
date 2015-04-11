@@ -156,7 +156,9 @@ class Ozh_Git_PR{
         // git pull --no-commit https://github.com/SOMEDUDE/SOMEFORK.git SOMEBRANCH
 
         $this->exec_and_maybe_continue( sprintf( "git checkout -b pr-%s", $this->pr ) );
-        $this->exec_and_maybe_continue( sprintf( "git pull --no-commit %s %s", $this->remote_url, $this->remote_branch ) );
+        $this->exec_and_maybe_continue( sprintf( "git pull --no-commit %s %s",
+            escapeshellarg($this->remote_url),
+            escapeshellarg($this->remote_branch) ) );
     }
 
 
