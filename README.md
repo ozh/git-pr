@@ -8,7 +8,7 @@ Add this to your git config (eg `~/.gitconfig`)
 
 ```ini
 [alias]
-    pr = "!php /full/path/to/ozh_git_pr.php"
+    pr = "!f() { git fetch -fu ${2:-origin} refs/pull/$1/head:pr/$1 && git checkout pr/$1; }; f"
 ```
 
 ## Usage
@@ -19,17 +19,8 @@ Assuming you want to locally test PR #1337, just do:
 git pr 1337
 ```
 
-This will be equivalent to :
-
-```sh
-git checkout -b pr-1337
-git pull --no-commit https://github.com/SOMEDUDE/SOMEFORK.git SOMEBRANCH
-```
-
 In details:
-* creates a new branch named `pr-1337` and switch to it
-* pulls whatever repo/branch has been submitted as the PR on Github
-* but does not commit changes, so you still see what files are modified and what's changed in them
+* keep things cool :)
 
 ## License
 
