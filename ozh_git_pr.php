@@ -6,7 +6,7 @@
  * Creates a new branch named "pr-1337" and pulls everything from the pull request without committing it
  */
 class Ozh_Git_PR{
-    
+
     /**
      * Current repo owner
      *
@@ -27,7 +27,7 @@ class Ozh_Git_PR{
      * @var integer
      */
     public $pr;
-    
+
     /**
      * Remote clone URL of the PR
      *
@@ -41,7 +41,7 @@ class Ozh_Git_PR{
      * @var string
      */
     public $remote_branch;
-    
+
 
     /**
      * Class constructor, does everything
@@ -51,11 +51,11 @@ class Ozh_Git_PR{
         $this->set_pr_num();
         $this->set_owner_repo();
         $this->set_pr_repo();
-        
+
         $this->pull_not_commit();
     }
-    
-    
+
+
     /**
      * Sets the PR ID number from the command line argument
      *
@@ -67,16 +67,16 @@ class Ozh_Git_PR{
         // expected usage : "script.php 1337" or "php script.php 1337"
         // First element of $argv will be the script file itself, second will be the PR number
 
-        if( count( $argv ) != 2 or !is_numeric( $argv[1] )) {
+        if( count( $argv ) != 2 or !ctype_digit( $argv[1] )) {
             $this->error_and_die( "Usage :\ngit pr [PR number]\nSee README" );
             die();
         }
-        
+
         $this->pr = $argv[1];
-        
+
     }
-    
-    
+
+
     /**
      * Simple curl wrapper
      *
@@ -97,7 +97,7 @@ class Ozh_Git_PR{
         return $result;
     }
 
-    
+
     /**
      * Sets the owner and repo name of the current repo we're in
      *
@@ -106,7 +106,7 @@ class Ozh_Git_PR{
      */
     function set_owner_repo( ) {
         $remotes = $this->exec_and_maybe_continue( "git remote -v", false );
-        
+
         // find the "fetch" repo, eg :
         // "origin\thttps://github.com/YOURLS/YOURLS.git (fetch)"
         $i = 0;
@@ -115,38 +115,38 @@ class Ozh_Git_PR{
         }
         preg_match( "/github.com\/(.*)\.git/", $remotes[ $i ], $matches );
         list( $owner, $repo ) = explode( "/", $matches[1] );
-        
+
         $this->owner = $owner;
         $this->repo  = $repo;
     }
-    
-    
+
+
     /**
      * Sets the URL and branch of the PR repo
      *
      */
     function set_pr_repo( ) {
         $url = sprintf( "https://api.github.com/repos/%s/%s/pulls/%d", $this->owner, $this->repo, $this->pr );
-        
+
         $json = $this->get_url( $url );
-        
+
         if( $json == false ) {
             echo "\n";
             echo sprintf( "Could not find PR %s\n", $this->pr );
             die();
         }
-        
+
         $json = json_decode( $json );
-        
+
         if( !isset( $json->head->repo->clone_url ) or !isset( $json->head->ref ) ) {
             $this->error_and_die( sprintf( "Could not find PR #%s !", $this->pr ) );
         }
-        
+
         $this->remote_url    = $json->head->repo->clone_url;
         $this->remote_branch = $json->head->ref;
     }
-    
- 
+
+
     /**
      * Creates the new branch and git pull the PR without committing
      *
@@ -154,12 +154,14 @@ class Ozh_Git_PR{
     function pull_not_commit( ) {
         // git checkout -b pr-1337
         // git pull --no-commit https://github.com/SOMEDUDE/SOMEFORK.git SOMEBRANCH
-        
+
         $this->exec_and_maybe_continue( sprintf( "git checkout -b pr-%s", $this->pr ) );
-        $this->exec_and_maybe_continue( sprintf( "git pull --no-commit %s %s", $this->remote_url, $this->remote_branch ) );
+        $this->exec_and_maybe_continue( sprintf( "git pull --no-commit %s %s",
+            escapeshellarg($this->remote_url),
+            escapeshellarg($this->remote_branch) ) );
     }
-    
-    
+
+
     /**
      * Displays message and dies
      *
@@ -171,9 +173,9 @@ class Ozh_Git_PR{
         echo "$error\n";
         echo "\n";
         die( $die_msg );
-        
+
     }
-    
+
 
     /**
      * Execs a command and dies if an error occured
@@ -184,18 +186,18 @@ class Ozh_Git_PR{
      */
     function exec_and_maybe_continue( $cmd, $display = true ) {
         exec( $cmd . " 2>&1", $output );
-        
+
         if( $display ) {
             echo implode( "\n", $output ) . "\n";
         }
-        
+
         if( preg_grep( '/fatal|error/', $output ) ) {
             die( "\nScript aborted !\n" );
         }
-        
+
         return $output;
     }
-    
+
 }
 
 // Launch and execute everything
