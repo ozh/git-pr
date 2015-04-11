@@ -191,8 +191,6 @@ class Ozh_Git_PR{
      * @return $array  command output
      */
     function exec_and_maybe_continue( $cmd, $display = true ) {
-        echo "$cmd\n";
-        
         exec( $cmd . " 2>&1", $output );
         
         if( $display ) {
