@@ -67,7 +67,7 @@ class Ozh_Git_PR{
         // expected usage : "script.php 1337" or "php script.php 1337"
         // First element of $argv will be the script file itself, second will be the PR number
 
-        if( count( $argv ) != 2 or !is_numeric( $argv[1] )) {
+        if( count( $argv ) != 2 or !ctype_digit( $argv[1] )) {
             $this->error_and_die( "Usage :\ngit pr [PR number]\nSee README" );
             die();
         }
