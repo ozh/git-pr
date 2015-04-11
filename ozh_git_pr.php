@@ -22,6 +22,13 @@ class Ozh_Git_PR{
     public $repo;
 
     /**
+     * Base branch for the PR (often 'master', but you can also make a PR against another branch)
+     *
+     * @var string
+     */
+    public $base_branch;
+
+    /**
      * Pull Request ID to pull
      *
      * @var integer
@@ -144,6 +151,7 @@ class Ozh_Git_PR{
         
         $this->remote_url    = $json->head->repo->clone_url;
         $this->remote_branch = $json->head->ref;
+        $this->base_branch   = $json->base->ref;
     }
     
  
@@ -152,10 +160,10 @@ class Ozh_Git_PR{
      *
      */
     function pull_not_commit( ) {
-        // git checkout -b pr-1337
+        // git checkout -b pr-1337 some_branch
         // git pull --no-commit https://github.com/SOMEDUDE/SOMEFORK.git SOMEBRANCH
         
-        $this->exec_and_maybe_continue( sprintf( "git checkout -b pr-%s", $this->pr ) );
+        $this->exec_and_maybe_continue( sprintf( "git checkout -b pr-%s %s", $this->pr, $this->base_branch ) );
         $this->exec_and_maybe_continue( sprintf( "git pull --no-commit %s %s", $this->remote_url, $this->remote_branch ) );
     }
     
@@ -183,6 +191,8 @@ class Ozh_Git_PR{
      * @return $array  command output
      */
     function exec_and_maybe_continue( $cmd, $display = true ) {
+        echo "$cmd\n";
+        
         exec( $cmd . " 2>&1", $output );
         
         if( $display ) {
