@@ -7,46 +7,46 @@
  */
 class Ozh_Git_PR{
     
-	/**
-	 * Current repo owner
-	 *
-	 * @var string
-	 */
+    /**
+     * Current repo owner
+     *
+     * @var string
+     */
     public $owner;
 
-	/**
-	 * Current repo name
-	 *
-	 * @var string
-	 */
+    /**
+     * Current repo name
+     *
+     * @var string
+     */
     public $repo;
 
-	/**
-	 * Pull Request ID to pull
-	 *
-	 * @var integer
-	 */
+    /**
+     * Pull Request ID to pull
+     *
+     * @var integer
+     */
     public $pr;
     
-	/**
-	 * Remote clone URL of the PR
-	 *
-	 * @var string
-	 */
+    /**
+     * Remote clone URL of the PR
+     *
+     * @var string
+     */
     public $remote_url;
 
-	/**
-	 * Remote branch of the PR
-	 *
-	 * @var string
-	 */
+    /**
+     * Remote branch of the PR
+     *
+     * @var string
+     */
     public $remote_branch;
     
 
-	/**
-	 * Class constructor, does everything
+    /**
+     * Class constructor, does everything
      *
-	 */
+     */
     function __construct() {
         $this->set_pr_num();
         $this->set_owner_repo();
