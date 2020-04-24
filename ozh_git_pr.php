@@ -1,12 +1,24 @@
-<?php
-
+<?php 
 /**
- * git pr 1337
+ * Usage: git pr [OPTION] [PR]
+ * Easily pull the content of pull request [PR] in a new branch, with
+ * or without committing the proposed changes.
  *
- * Creates a new branch named "pr-1337" and pulls everything from the pull request without committing it
+ * The following option can be used to prevent committing
+ *  -n, --nocommit      pull PR but don't commit changes
+ *  -h, --help          display the help message
+ * 
+ * For more details, please see the readme file.
  */
 class Ozh_Git_PR{
     
+    /**
+     * Version of this class
+     *
+     * @var string
+     */
+    public $version = '1.1';
+
     /**
      * Current repo owner
      *
@@ -36,6 +48,13 @@ class Ozh_Git_PR{
     public $pr;
     
     /**
+     * Do we want to commit changes or not
+     *
+     * @var bool
+     */
+    public $commit;
+    
+    /**
      * Remote clone URL of the PR
      *
      * @var string
@@ -49,40 +68,70 @@ class Ozh_Git_PR{
      */
     public $remote_branch;
     
-
     /**
      * Class constructor, does everything
      *
      */
     function __construct() {
-        $this->set_pr_num();
+        $this->get_params();
         $this->set_owner_repo();
         $this->set_pr_repo();
-        
-        $this->pull_not_commit();
+        $this->pull_and_maybe_commit();
     }
-    
     
     /**
-     * Sets the PR ID number from the command line argument
-     *
-     * If incorrect arguments are passed, prints help and dies
-     *
+     *  Get the content of this file comment header and send it to print help
      */
-    function set_pr_num( ) {
-        global $argv;
-        // expected usage : "script.php 1337" or "php script.php 1337"
-        // First element of $argv will be the script file itself, second will be the PR number
-
-        if( count( $argv ) != 2 or !ctype_digit( $argv[1] )) {
-            $this->error_and_die( "Usage :\ngit pr [PR number]\nSee README" );
-            die();
+    function help() {
+        $lines      = file(__FILE__);
+        $in_comment = false;
+        $help       = '';
+        
+        // Read lines of this very file to get the comment header
+        foreach($lines as $line) {
+            // when we first encounter a line starting with '/**', this means we're now in the header
+            if( !$in_comment && preg_match('|^\s*/\*\*|', $line) ) {
+                $in_comment = true;
+                continue;
+            }
+            
+            // if we're in the header and encounter a line with '*/', stop reading
+            if( $in_comment && preg_match('|\*/|', $line) ) {
+                unset($lines);
+                break;
+            }
+            
+            if( $in_comment ) {
+                $help .= preg_replace('/^\s*\*\s/', '', $line);
+            }
         }
-        
-        $this->pr = $argv[1];
-        
+            
+        $this->error_and_die($help);
     }
     
+    /**
+     *  Get parameters from command line
+     */
+    function get_params() {
+        // read arguments from command line
+        $args     = getopt("nh", array('nocommit,help'), $optind);
+        $nocommit = isset($args['n']) || isset($args['nocommit']);
+        $help     = isset($args['h']) || isset($args['help']);
+        $pr       = array_slice($_SERVER['argv'], $optind);
+        
+        // we must have ONE trailing parameter, and it must be numeric
+        if( count($pr) != 1 || !ctype_digit($pr[0]) ) {
+            $pr = false;
+        }
+        
+        if($help or !$pr) {
+            $this->help();
+            // this will die here
+        }
+        
+        $this->commit = !$nocommit;
+        $this->pr = (int)$pr[0];
+    }
     
     /**
      * Simple curl wrapper
@@ -97,33 +146,28 @@ class Ozh_Git_PR{
         curl_setopt( $ch, CURLOPT_URL, $url );
         curl_setopt( $ch, CURLOPT_HEADER, 0 );
         curl_setopt( $ch, CURLOPT_RETURNTRANSFER , 1 );
-        curl_setopt( $ch, CURLOPT_USERAGENT,'PHP Ozh_Git_PR 1.0' );
+        curl_setopt( $ch, CURLOPT_USERAGENT,'PHP Ozh_Git_PR ' . $this->version );
         $result = curl_exec( $ch );
         curl_close( $ch );
         return $result;
     }
-
     
     /**
      * Sets the owner and repo name of the current repo we're in
      *
-     * This gets the first fetch repo URL -- assuming this is "origin"
+     * This gets the first fetch repo URL named "origin"
      *
      */
     function set_owner_repo( ) {
-        $remotes = $this->exec_and_maybe_continue( "git remote -v", false );
-        
-        // find the "fetch" repo, eg :
-        // "origin\thttps://github.com/YOURLS/YOURLS.git (fetch)"
-        $i = 0;
-        while( false === strpos( $remotes[ $i ], "fetch" ) ) {
-            $i++;
+        $remote = $this->exec_and_maybe_continue( "git remote get-url origin", false );
+        // will get something like: array('https://github.com/YOURLS/YOURLS.git')
+        preg_match( "/github.com\/(.*)\/(.*)/", $remote[0], $matches );
+        if( count($matches) == 3 ) {
+            $this->owner = $matches[1];
+            $this->repo  = trim($matches[2], '.git');
+        } else {
+            $this->error_and_die( "Could not find Github owner and repo" );
         }
-        preg_match( "/github.com\/(.*)\.git/", $remotes[ $i ], $matches );
-        list( $owner, $repo ) = explode( "/", $matches[1] );
-        
-        $this->owner = $owner;
-        $this->repo  = $repo;
     }
     
     
@@ -133,40 +177,38 @@ class Ozh_Git_PR{
      */
     function set_pr_repo( ) {
         $url = sprintf( "https://api.github.com/repos/%s/%s/pulls/%d", $this->owner, $this->repo, $this->pr );
-        
+                
         $json = $this->get_url( $url );
         
         if( $json == false ) {
-            echo "\n";
-            echo sprintf( "Could not find PR %s\n", $this->pr );
-            die();
+            $this->error_and_die( "Could not read info from Github API" );
         }
         
         $json = json_decode( $json );
         
         if( !isset( $json->head->repo->clone_url ) or !isset( $json->head->ref ) ) {
-            $this->error_and_die( sprintf( "Could not find PR #%s !", $this->pr ) );
+            $this->error_and_die( sprintf( "Could not find info for PR #%s (maybe PR repo was deleted?)\n", $this->pr ) );
         }
         
         $this->remote_url    = $json->head->repo->clone_url;
         $this->remote_branch = $json->head->ref;
         $this->base_branch   = $json->base->ref;
     }
-    
- 
+
     /**
      * Creates the new branch and git pull the PR without committing
      *
      */
-    function pull_not_commit( ) {
+    function pull_and_maybe_commit( ) {
         // git checkout -b pr-1337 some_branch
-        // git pull --no-commit https://github.com/SOMEDUDE/SOMEFORK.git SOMEBRANCH
+        // git pull (--no-commit) https://github.com/SOMEDUDE/SOMEFORK.git SOMEBRANCH
+        
+        $commit = $this->commit === true ? '' : '--no-commit';
         
         $this->exec_and_maybe_continue( sprintf( "git checkout -b pr-%s %s", $this->pr, $this->base_branch ) );
-        $this->exec_and_maybe_continue( sprintf( "git pull --no-commit %s %s", $this->remote_url, $this->remote_branch ) );
+        $this->exec_and_maybe_continue( sprintf( "git pull %s %s %s", $commit, $this->remote_url, $this->remote_branch ) );
     }
-    
-    
+
     /**
      * Displays message and dies
      *
@@ -174,13 +216,11 @@ class Ozh_Git_PR{
      * @param string $die_msg  optional additional message (eg "script aborted")
      */
     function error_and_die( $error, $die_msg = '' ) {
-        echo "\n";
-        echo "$error\n";
+        echo trim($error) . "\n";
         echo "\n";
         die( $die_msg );
         
     }
-    
 
     /**
      * Execs a command and dies if an error occured
@@ -204,6 +244,5 @@ class Ozh_Git_PR{
     }
     
 }
-
 // Launch and execute everything
 new Ozh_Git_PR;
