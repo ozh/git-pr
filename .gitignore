@@ -1,0 +1,8 @@
+# PHPUnit template
+.phpunit.result.cache
+.phpunit.cache
+/phpunit.xml
+/build/
+
+# PhpStorm and other JetBrains IDEs
+.idea/
