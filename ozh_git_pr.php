@@ -6,12 +6,12 @@
  *
  * Startup:
  *  -l | --list              list all pull requests of the current repo
+ *  -c | --cleanup           cleanup remotes of PRs that are no longer open
  *  -v | --version           display the version number
  *  -h | --help              display the help message
  *
  * Pull options:
  *  -n | --nocommit          pull given PR but don't commit changes
- *  -t | --test              test the script, do not actually pull the PR
  *
  * Branch options:
  *  -b | --branch <branch>   custom local PR branch name (defaults to "pr-[PR_NUM]")
@@ -23,6 +23,7 @@
  *  git pr -b "feature-fix" 1337
  *  git pr -s 1337
  *  git pr -l
+ *  git pr -c
  *
  * For more details, please see the readme file or https://github.com/ozh/git-pr
  */
@@ -30,7 +31,7 @@
 class Ozh_Git_PR{
 
     // Version of this class
-    public string $version = '1.2';
+    public string $version = '1.3';
 
     // Current repo owner
     public string $owner;
@@ -55,9 +56,6 @@ class Ozh_Git_PR{
 
     // Local branch name of the PR
     public string $branch;
-
-    // test mode
-    public bool $test = false;
 
     /**
      * Init and do everything
@@ -107,14 +105,14 @@ class Ozh_Git_PR{
      */
     function get_cli_params(): void {
         // read arguments from the command line
-        $args      = getopt("tlnhsb:v", ['suggest','list','nocommit','no-commit','help','branch:','version', 'test'], $option_index);
+        $args      = getopt("lnchsb:v", ['suggest','list','nocommit','no-commit','help','branch:','version', 'cleanup'], $option_index);
         $nocommit  = isset($args['n']) || isset($args['nocommit']) || isset($args['no-commit']);
         $help      = isset($args['h']) || isset($args['help']);
         $branch    = ( isset($args['b']) || isset($args['branch']) ) ? ($args['b'] ?? $args['branch']) : false;
         $version   = isset($args['v']) || isset($args['version']);
         $list      = isset($args['l']) || isset($args['list']);
         $suggest   = isset($args['s']) || isset($args['suggest']);
-        $this->test = isset($args['t']) || isset($args['test']);
+        $cleanup   = isset($args['c']) || isset($args['cleanup']);
 
         // Mark --branch and --suggest as mutually exclusive
         if ( $branch && $suggest ) {
@@ -127,6 +125,11 @@ class Ozh_Git_PR{
             $pr = false;
         } else {
             $this->pr = (int)$pr[0];
+        }
+
+        if ($cleanup) {
+            $this->cleanup_old_pr_remotes();
+            exit(0);
         }
 
         if ($list) {
@@ -193,25 +196,101 @@ class Ozh_Git_PR{
     }
 
     /**
+     * Fetch pull requests from GitHub API
+     *
+     * @param string $state State filter: 'open', 'closed', 'all' (default: 'open')
+     * @param int $per_page Number of results per page (default: 100)
+     * @return array|null Array of PRs or null on error
+     */
+    function fetch_prs( string $state = 'open', int $per_page = 100 ): ?array {
+        $url = sprintf(
+            "https://api.github.com/repos/%s/%s/pulls?state=%s&per_page=%d",
+            $this->owner,
+            $this->repo,
+            $state,
+            $per_page
+        );
+        
+        $json = $this->get_url($url);
+        $prs = json_decode($json, true);
+        
+        return is_array($prs) ? $prs : null;
+    }
+
+    /**
      * Lists the pull requests of the current repo
      *
      */
     function list_prs( ): string {
-        // fetch https://api.github.com/repos/$this->owner/$this->repo/pulls
-        // for each PR, display its number and title
+        $prs = $this->fetch_prs('open');
+        
+        if ($prs === null) {
+            return "Error: Could not fetch PR list from GitHub API";
+        }
+        
+        if (empty($prs)) {
+            return "No pull requests found";
+        }
+        
         $list = '';
-        $url = sprintf( "https://api.github.com/repos/%s/%s/pulls", $this->owner, $this->repo );
-        $json = $this->get_url( $url );
-        $prs = json_decode( $json );
         foreach( $prs as $pr ) {
-            if ( isset( $pr->number ) && isset( $pr->title ) ) {
-                $list .= sprintf( "%d - %s\n", $pr->number, $pr->title );
+            if ( isset( $pr['number'] ) && isset( $pr['title'] ) ) {
+                $list .= sprintf(
+                    "%d - %s (%s:%s)\n",
+                    $pr['number'],
+                    $pr['title'],
+                    $pr['head']['repo']['full_name'],
+                    $pr['head']['ref']
+                );
             }
         }
-        if ($list === '') {
-            $list = "No pull requests found";
-        }
+        
         return $list;
+    }
+
+    /**
+     * Cleanup old PR remotes that are no longer open
+     *
+     */
+    function cleanup_old_pr_remotes(): void {
+        // Get all remotes starting with "pr-"
+        $remotes = $this->exec_and_maybe_continue("git remote", false);
+        $pr_remotes = array_filter($remotes, fn($r) => str_starts_with($r, 'pr-'));
+        
+        if (empty($pr_remotes)) {
+            echo "No PR remotes found to clean up.\n";
+            return;
+        }
+        
+        // Fetch all OPEN PRs in a single API call
+        $open_prs = $this->fetch_prs('open', 100);
+        
+        if ($open_prs === null) {
+            echo "Error: Could not fetch PR list from GitHub API\n";
+            return;
+        }
+        
+        // Build a set of open PR numbers for quick lookup
+        $open_pr_numbers = array_map(fn($pr) => (int)$pr['number'], $open_prs);
+        
+        $removed_count = 0;
+        foreach($pr_remotes as $remote) {
+            // Extract PR number from remote name (e.g., "pr-4025" -> 4025)
+            if (preg_match('/^pr-(\d+)$/', $remote, $matches)) {
+                $pr_num = (int)$matches[1];
+                
+                // Remove remote if PR is not in the open PRs list
+                if (!in_array($pr_num, $open_pr_numbers)) {
+                    echo sprintf("Removing remote '%s' (PR #%d is not open)\n", $remote, $pr_num);
+                    $this->exec_and_maybe_continue("git remote remove $remote");
+                    $removed_count++;
+                } else {
+                    echo sprintf("Keeping remote '%s' (PR #%d is still open)\n", $remote, $pr_num);
+                }
+            }
+        }
+        
+        echo sprintf("\n%d remote(s) removed.\n", $removed_count);
     }
 
     /**
@@ -262,14 +341,29 @@ class Ozh_Git_PR{
      *
      */
     function pull_and_maybe_commit( ): void {
+        // git remote add pr-1337 https://github.com/SOMEDUDE/SOMEFORK.git (or update if exists)
         // git checkout -b pr-1337 some_branch
-        // git pull (--no-commit) https://github.com/SOMEDUDE/SOMEFORK.git SOMEBRANCH
+        // git pull (--no-commit) --set-upstream pr-1337 SOMEBRANCH
         
         $commit = $this->commit === true ? '' : '--no-commit';
         $branch = $this->branch ?: sprintf("pr-%d", $this->pr);
+        $remote_name = sprintf("pr-%d", $this->pr);
         
+        // Check if remote already exists
+        $existing_remotes = $this->exec_and_maybe_continue( "git remote", false );
+        if ( in_array( $remote_name, $existing_remotes ) ) {
+            // Remote exists, update its URL in case it changed
+            $this->exec_and_maybe_continue( sprintf( "git remote set-url %s %s", $remote_name, $this->remote_url ) );
+        } else {
+            // Add the PR fork as a new remote
+            $this->exec_and_maybe_continue( sprintf( "git remote add %s %s", $remote_name, $this->remote_url ) );
+        }
+        
+        // Create and checkout the new branch
         $this->exec_and_maybe_continue( sprintf( "git checkout -b %s %s", $branch, $this->base_branch ) );
-        $this->exec_and_maybe_continue( sprintf( "git pull %s %s %s", $commit, $this->remote_url, $this->remote_branch ) );
+        
+        // Pull from the remote and set upstream tracking
+        $this->exec_and_maybe_continue( sprintf( "git pull %s --set-upstream %s %s", $commit, $remote_name, $this->remote_branch ) );
     }
 
     /**
@@ -289,14 +383,9 @@ class Ozh_Git_PR{
      *
      * @param string $cmd     command to execute
      * @param bool   $display if the command output should be displayed or not
-     * @return array|void $array  command output
+     * @return array $array  command output
      */
-    function exec_and_maybe_continue(string $cmd, bool $display = true ) {
-        if ( $this->test ) {
-            print "Test mode: $cmd\n";
-            return;
-        }
-
+    function exec_and_maybe_continue(string $cmd, bool $display = true ): array {
         exec( escapeshellcmd( $cmd ) . " 2>&1", $output );
         
         if ( $display ) {
